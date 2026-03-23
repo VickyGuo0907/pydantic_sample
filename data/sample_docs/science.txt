@@ -1,0 +1,9 @@
+Photosynthesis is the process used by plants, algae and some bacteria to harness energy from sunlight and turn it into chemical energy. The overall equation is: 6CO2 + 6H2O + light energy → C6H12O6 + 6O2.
+
+The speed of light in a vacuum is exactly 299,792,458 metres per second (approximately 3×10^8 m/s). Nothing with mass can travel at or faster than this speed.
+
+Water boils at 100 degrees Celsius (212 degrees Fahrenheit) at standard atmospheric pressure (1 atm). The boiling point decreases at higher altitudes where atmospheric pressure is lower.
+
+A leap year has 366 days instead of the usual 365. It occurs every four years, with the exception of century years that are not divisible by 400. A leap year contains 366 × 24 × 60 × 60 = 31,622,400 seconds.
+
+DNA (deoxyribonucleic acid) carries the genetic instructions for the development, functioning, growth and reproduction of all known organisms and many viruses. It is a double-helix polymer made of nucleotide units.
