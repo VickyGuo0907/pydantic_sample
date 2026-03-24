@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import logging
 import sys
+from unittest.mock import AsyncMock, MagicMock, patch
 
+import httpx
 import pytest
 
 from main import parse_args, print_chain, print_report
@@ -214,3 +217,92 @@ class TestPrintReport:
         print_report(report)
         out = capsys.readouterr().out
         assert "Logical Errors" not in out
+
+
+# ---------------------------------------------------------------------------
+# main() exception handling
+# ---------------------------------------------------------------------------
+
+class TestMainExceptionHandling:
+    """Test that main() surfaces errors with user-friendly messages."""
+
+    def _run_main_with_error(self, exc: Exception) -> tuple[str, int]:
+        """Patch run_reasoning_pipeline to raise exc, run main(), capture output."""
+        from main import main
+
+        sys.argv = ["main.py", "test query"]
+        with patch("main.run_reasoning_pipeline", new=AsyncMock(side_effect=exc)):
+            with pytest.raises(SystemExit) as exc_info:
+                main()
+        return exc_info.value.code
+
+    def test_value_error_exits_1(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """ValueError (config error) causes exit code 1 with hint message."""
+        code = self._run_main_with_error(ValueError("bad config"))
+        assert code == 1
+        err = capsys.readouterr().err
+        assert "Configuration error" in err
+        assert "Hint" in err
+
+    def test_network_error_exits_1(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """httpx.NetworkError causes exit code 1 with network hint message."""
+        code = self._run_main_with_error(httpx.NetworkError("connection refused"))
+        assert code == 1
+        err = capsys.readouterr().err
+        assert "Network error" in err
+        assert "Hint" in err
+
+    def test_generic_exception_exits_1(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """Unexpected exceptions cause exit code 1 with debug hint."""
+        code = self._run_main_with_error(RuntimeError("something broke"))
+        assert code == 1
+        err = capsys.readouterr().err
+        assert "Unexpected error" in err
+        assert "Hint" in err
+
+
+# ---------------------------------------------------------------------------
+# RAG corpus empty warning
+# ---------------------------------------------------------------------------
+
+class TestRagCorpusWarning:
+    """Test that an empty vector store emits a warning before querying."""
+
+    @pytest.mark.asyncio
+    async def test_empty_corpus_logs_warning(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Empty vector store triggers a WARNING in the pipeline."""
+        import argparse
+
+        from main import run_reasoning_pipeline
+
+        mock_store = MagicMock()
+        mock_store.is_empty.return_value = True
+
+        mock_chain = _make_chain()
+
+        args = argparse.Namespace(
+            query="test",
+            provider=None,
+            no_verify=True,
+            verbose=False,
+        )
+
+        with patch("main.Settings") as mock_settings_cls:
+            mock_settings = MagicMock()
+            mock_settings.rag_enabled = True
+            mock_settings.vector_store_path = ".chromadb"
+            mock_settings.openai_api_key = None
+            mock_settings.embedding_model = "text-embedding-3-small"
+            mock_settings.search_api_key = None
+            mock_settings.llm_provider = "openai"
+            mock_settings_cls.return_value = mock_settings
+
+            with patch("main.VectorStore", return_value=mock_store):
+                with patch("main.resolve_openai_key", return_value=None):
+                    with patch("main.run_reasoning", new=AsyncMock(return_value=mock_chain)):
+                        with caplog.at_level(logging.WARNING, logger="main"):
+                            await run_reasoning_pipeline(args)
+
+        assert any("empty" in r.message.lower() for r in caplog.records)

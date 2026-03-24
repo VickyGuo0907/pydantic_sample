@@ -23,8 +23,8 @@ VerificationReport (per-step audit + overall score)
 ```
 pydantic_sample/
 ├── agents/
-│   ├── reasoning.py        # Multi-step reasoning agent with tool use
-│   └── verifier.py         # Independent verification agent
+│   ├── reasoning.py        # Multi-step reasoning agent + exponential backoff retry
+│   └── verifier.py         # Independent verification agent + exponential backoff retry
 ├── config/
 │   └── settings.py         # Provider config + RAG settings
 ├── data/
@@ -37,10 +37,10 @@ pydantic_sample/
 │   └── ingest.py           # CLI: chunk + embed + index docs → ChromaDB
 ├── tools/
 │   ├── calculator.py       # Safe math via AST parsing (no eval)
-│   ├── retriever.py        # VectorStore (ChromaDB), chunk_text, retrieve
-│   └── search.py           # Web search with demo fallback
-├── tests/                  # Full test suite (no real API calls)
-├── main.py                 # CLI entry point
+│   ├── retriever.py        # VectorStore (ChromaDB), chunk_text, is_empty, retrieve
+│   └── search.py           # Web search with demo fallback + warning log
+├── tests/                  # Full test suite (no real API calls, 92% coverage)
+├── main.py                 # CLI entry point + structured error handling
 └── .env.example
 ```
 
@@ -108,8 +108,8 @@ RAG_ENABLED=true python main.py "query"
 | Tool | Description |
 |------|-------------|
 | `calculator` | AST-based safe eval — whitelist operators only, no `eval()` |
-| `search` | DuckDuckGo async HTTP, demo fallback when no API key |
-| `retrieve` | ChromaDB vector search; returns graceful message when RAG disabled |
+| `search` | DuckDuckGo async HTTP, demo fallback when no API key; emits `WARNING` log when falling back |
+| `retrieve` | ChromaDB vector search; returns graceful message when RAG disabled; warns if corpus is empty |
 
 ### RAG Pipeline
 
@@ -132,18 +132,21 @@ RAG_ENABLED=true python main.py "query"
 **Retrieval** (at query time):
 
 1. `main.py` loads `VectorStore` from `VECTOR_STORE_PATH` when `RAG_ENABLED=true`
-2. `VectorStore` passed into `ReasoningDeps`; `None` disables RAG without any branching in agent logic
-3. LLM calls `retrieve_tool(query)` → `VectorStore.retrieve(query, top_k=3)`
-4. ChromaDB returns **L2 distances**, converted to `[0, 1]` relevance score: `score = 1.0 / (1.0 + L2_distance)`
-5. Top-3 chunks formatted via `as_context_string()` and returned as tool output string
+2. `VectorStore.is_empty()` is checked immediately — a `WARNING` with a remediation hint is logged if the corpus is empty (run `python scripts/ingest.py` to index documents)
+3. `VectorStore` passed into `ReasoningDeps`; `None` disables RAG without any branching in agent logic
+4. LLM calls `retrieve_tool(query)` → `VectorStore.retrieve(query, top_k=3)`
+5. ChromaDB returns **L2 distances**, converted to `[0, 1]` relevance score: `score = 1.0 / (1.0 + L2_distance)`
+6. Top-3 chunks formatted via `as_context_string()` and returned as tool output string
 
 ### Agent Design
 
 - **Factory pattern** — `create_reasoning_agent(model)` accepts any model instance (including `TestModel`)
 - **Dependency injection** — `ReasoningDeps(search_api_key, vector_store)` passed via `RunContext`
 - **Independent verification** — verifier agent receives `chain.model_dump_json()` as input; no shared state with reasoning agent
-- **Retries** — both agents retry up to 3 times on structured output validation failure
+- **Structured output retries** — both agents retry up to 3 times on output validation failure (pydantic-ai `retries=3`)
+- **Transient error retries** — `_run_with_backoff()` wraps each `agent.run()` call with up to 3 attempts and exponential delays (1s → 2s → 4s); `ValueError` (config errors) is re-raised immediately without retrying
 - **Provider abstraction** — `Settings.get_model()` returns a unified `pydantic_ai.Model`; LM Studio uses the OpenAI-compatible interface
+- **Structured error handling** — `main()` catches `ValueError` (config), `httpx.NetworkError` (connectivity), and all other exceptions separately, printing user-friendly messages with remediation hints
 
 ### LM Studio Notes
 
@@ -162,10 +165,11 @@ All tests use pydantic-ai's `TestModel` — no real API calls required.
 |-----------|----------|
 | `test_config.py` | Provider switching, API key validation, RAG settings |
 | `test_schemas.py` | Pydantic validation rules, serialization round-trips |
-| `test_tools.py` | Calculator injection safety, search demo fallback |
-| `test_retriever.py` | `chunk_text` edge cases, `VectorStore` in-memory add/retrieve/score |
+| `test_tools.py` | Calculator injection safety, search demo fallback, demo mode warning log, real mode no-warning |
+| `test_retriever.py` | `chunk_text` edge cases, `VectorStore` in-memory add/retrieve/score, `is_empty()` |
 | `test_reasoning.py` | Agent factory, tool registration, `ReasoningDeps` with `VectorStore` |
 | `test_verifier.py` | Verifier factory, no-tools assertion, `TestModel` integration |
+| `test_main.py` | CLI args, output formatting, error handling (ValueError/NetworkError/Exception), empty corpus warning |
 
 ## Dependencies
 

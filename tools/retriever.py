@@ -130,6 +130,14 @@ class VectorStore:
         self._collection.upsert(documents=texts, ids=ids, metadatas=metadatas)
         logger.debug("Indexed %d chunks from %s", len(texts), source)
 
+    def is_empty(self) -> bool:
+        """Return True if the vector store contains no documents.
+
+        Returns:
+            True when the collection has zero indexed chunks.
+        """
+        return self._collection.count() == 0
+
     def retrieve(self, query: str, top_k: int = 3) -> RetrievalResult:
         """Query the vector store for the most relevant chunks.
 

@@ -106,3 +106,31 @@ class TestSearch:
         """Test empty string API key triggers demo mode."""
         result = await search("anything", api_key="")
         assert "Demo Mode" in result or "Note:" in result
+
+    @pytest.mark.asyncio
+    async def test_demo_mode_logs_warning(self, caplog: pytest.LogCaptureFixture) -> None:
+        """Test that demo mode emits a WARNING so operators notice the degradation."""
+        import logging
+
+        with caplog.at_level(logging.WARNING, logger="tools.search"):
+            await search("some query")
+        assert any("SEARCH_API_KEY" in r.message for r in caplog.records)
+
+    @pytest.mark.asyncio
+    async def test_real_mode_no_warning(self, caplog: pytest.LogCaptureFixture) -> None:
+        """Test that a non-empty API key does NOT trigger the demo mode warning."""
+        import logging
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        mock_response = MagicMock()
+        mock_response.json.return_value = {"AbstractText": "Result", "RelatedTopics": []}
+        mock_response.raise_for_status = lambda: None
+
+        with caplog.at_level(logging.WARNING, logger="tools.search"):
+            with patch("httpx.AsyncClient") as mock_client:
+                mock_client.return_value.__aenter__.return_value.get = AsyncMock(
+                    return_value=mock_response
+                )
+                await search("test", api_key="real-key-123")
+
+        assert not any("SEARCH_API_KEY" in r.message for r in caplog.records)

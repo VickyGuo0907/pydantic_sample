@@ -7,6 +7,8 @@ import asyncio
 import logging
 import sys
 
+import httpx
+
 from agents.reasoning import run_reasoning
 from agents.verifier import run_verification
 from config.settings import Settings
@@ -133,6 +135,12 @@ async def run_reasoning_pipeline(args: argparse.Namespace) -> None:
             openai_api_key=resolve_openai_key(settings.openai_api_key),
             embedding_model=settings.embedding_model,
         )
+        if vector_store.is_empty():
+            logger.warning(
+                "Vector store at '%s' is empty — RAG retrieve calls will return no results. "
+                "Run: python scripts/ingest.py to index documents first.",
+                settings.vector_store_path,
+            )
 
     # Step 1: Multi-step reasoning
     logger.info("Reasoning about: %s (provider: %s)", args.query, settings.llm_provider)
@@ -162,6 +170,15 @@ def main() -> None:
         sys.exit(1)
     except ValueError as exc:
         print(f"Configuration error: {exc}", file=sys.stderr)
+        print("Hint: Check your .env file and ensure LLM_PROVIDER and the matching API key are set.", file=sys.stderr)
+        sys.exit(1)
+    except httpx.NetworkError as exc:
+        print(f"Network error: {exc}", file=sys.stderr)
+        print("Hint: Check your internet connection and API endpoint URLs.", file=sys.stderr)
+        sys.exit(1)
+    except Exception as exc:
+        print(f"Unexpected error: {exc}", file=sys.stderr)
+        print("Hint: Run with --verbose or set LOG_LEVEL=DEBUG for more detail.", file=sys.stderr)
         sys.exit(1)
 
 

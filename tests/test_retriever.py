@@ -74,3 +74,12 @@ class TestVectorStore:
         result = store.retrieve("content", top_k=1)
         for chunk in result.chunks:
             assert 0.0 <= chunk.score <= 1.0
+
+    def test_is_empty_true_when_no_documents(self, store: VectorStore) -> None:
+        """is_empty() returns True on a freshly created store."""
+        assert store.is_empty() is True
+
+    def test_is_empty_false_after_adding_documents(self, store: VectorStore) -> None:
+        """is_empty() returns False after at least one document is indexed."""
+        store.add_documents(texts=["Some text."], source="doc.txt")
+        assert store.is_empty() is False

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 
 from pydantic_ai import Agent
@@ -53,6 +54,45 @@ def create_verification_agent(model: Model | str) -> Agent[None, VerificationRep
     )
 
 
+async def _run_with_backoff(
+    coro_fn,
+    *,
+    max_retries: int = 3,
+    base_delay: float = 1.0,
+) -> object:
+    """Run an async callable with exponential backoff on transient failures.
+
+    Args:
+        coro_fn: A zero-argument async callable to attempt.
+        max_retries: Maximum total attempts before re-raising.
+        base_delay: Initial delay in seconds; doubles on each retry.
+
+    Returns:
+        The return value of coro_fn on success.
+
+    Raises:
+        ValueError: Immediately — these indicate config errors, not transience.
+        Exception: Re-raised after all retries are exhausted.
+    """
+    for attempt in range(max_retries):
+        try:
+            return await coro_fn()
+        except ValueError:
+            raise
+        except Exception as exc:
+            if attempt == max_retries - 1:
+                raise
+            delay = base_delay * (2 ** attempt)
+            logger.warning(
+                "Verification agent attempt %d/%d failed (%s). Retrying in %.1fs...",
+                attempt + 1,
+                max_retries,
+                exc,
+                delay,
+            )
+            await asyncio.sleep(delay)
+
+
 async def run_verification(
     chain: ReasoningChain, settings: Settings
 ) -> VerificationReport:
@@ -73,5 +113,5 @@ async def run_verification(
         f"{chain.model_dump_json(indent=2)}"
     )
     logger.debug("Running verification agent on chain for query: %s", chain.query)
-    result = await agent.run(prompt)
+    result = await _run_with_backoff(lambda: agent.run(prompt))
     return result.output

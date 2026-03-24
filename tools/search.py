@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import logging
+
 import httpx
+
+logger = logging.getLogger(__name__)
 
 # Demo responses for common query patterns (used when no API key is set).
 _DEMO_RESPONSES: dict[str, str] = {
@@ -56,6 +60,11 @@ def _demo_search(query: str) -> str:
     Returns:
         A demo response string matching the query topic.
     """
+    logger.warning(
+        "SEARCH_API_KEY is not set — returning demo results for query: %r. "
+        "Set SEARCH_API_KEY in your .env for real web search.",
+        query,
+    )
     query_lower = query.lower()
     for keyword, response in _DEMO_RESPONSES.items():
         if keyword in query_lower:
